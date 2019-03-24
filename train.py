@@ -17,6 +17,7 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import utils
+from tensorboardX import SummaryWriter
 
 ########################################################################
 # The output of torchvision datasets are PILImage images of range [0, 1].
@@ -123,7 +124,7 @@ class Net_adaptive_pool_Small(nn.Module):
         return x
 
 
-def forward(net, criterion, optimizer, dataloader,device, train=True):
+def forward(net, criterion, optimizer, dataloader,device, writer = None, train=True):
     '''
     forward pass, both train and eval
     :param net:
@@ -167,20 +168,33 @@ def forward(net, criterion, optimizer, dataloader,device, train=True):
         running_loss += loss.item()
         running_corrects += torch.sum(preds == labels.data)
 
-        # if i % 2000 == 1999:  # print every 2000 mini-batches
-        #     print(".", end="")
+        # if i % 100 == 99:  # print every 100 mini-batches
+        #     writer('loss_L', loss_l.item(), all_batch_cntr)
+        #     writer('loss_C', loss_c.item(), all_batch_cntr)
+
     len_dataset = float(len(dataloader.dataset))
     return  (running_loss/len_dataset , running_corrects.double()/len_dataset)
 
 import time
 import copy
 def main(net, criterion, optimizer, device):
-    best_acc = 0.0
-    PATH = "./model_weights.pth"
-    for epoch in range(10):  # loop over the dataset multiple times
-        trn_lss, trn_acc = forward(net, criterion, optimizer, trainloader, device)
 
-        tst_lss, tst_acc = forward(net, criterion, optimizer, testloader,device, train=False)
+    # tensorboard tracker
+    writer = SummaryWriter()
+    NUMB_EPOCHS = 30
+    PATH = "./model_weights.pth"
+    best_acc = 0.0
+
+    for epoch in range(NUMB_EPOCHS):  # loop over the dataset multiple times
+        trn_lss, trn_acc = forward(net, criterion, optimizer, trainloader,device,writer=writer)
+
+        tst_lss, tst_acc = forward(net, criterion, optimizer, testloader,device, writer = writer, train=False)
+
+        writer.add_scalars('losses', {"trn_lss": trn_lss,
+                                      "tst_lss": tst_lss}, epoch)
+
+        writer.add_scalars('accuracy', {"trn_acc": trn_acc,
+                                        "tst_acc": tst_acc}, epoch)
 
         print('Training loss: %.3f  accuracy: %.3f' % (trn_lss, trn_acc) +
               ' Testing loss: %.3f  accuracy: %.3f' % (tst_lss, tst_acc))
@@ -191,8 +205,9 @@ def main(net, criterion, optimizer, device):
             torch.save(net.state_dict(), PATH)
 
     print('Finished Training')
+    writer.close()
 
-def check_each_class_accuracy(net, testloader):
+def check_each_class_accuracy(net, testloader, device):
     '''
     check the accuracy of each class, should be way above 10%
     :return:
