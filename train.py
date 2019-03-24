@@ -1,7 +1,11 @@
-# -*- coding: utf-8 -*-
 """
 Training an image classifier
-----------------------------
+this project replaces the layer before the fully connected layers
+in a convolutional network with an adaptive max pool layer
+to allow using any sized images for input
+
+Without it the first fully connected layer dictats the exact size
+of an input image
 
 We will do the following steps in order:
 
@@ -16,40 +20,36 @@ We will do the following steps in order:
 import torch
 import torchvision
 import torchvision.transforms as transforms
-import utils
 from tensorboardX import SummaryWriter
-
-########################################################################
-# The output of torchvision datasets are PILImage images of range [0, 1].
-# We transform them to Tensors of normalized range [-1, 1].
-
-transform = transforms.Compose(
-    [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                        download=True, transform=transform)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=4,
-                                          shuffle=True, num_workers=2)
-
-testset = torchvision.datasets.CIFAR10(root='./data', train=False,
-                                       download=True, transform=transform)
-testloader = torch.utils.data.DataLoader(testset, batch_size=4,
-                                         shuffle=False, num_workers=2)
-
-classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
-
-########################################################################
-# 2. Define a Convolution Neural Network
-#
-# take 3-channel images (instead of 1-channel images as it was defined).
-# 2 networks presented here
-#cifar 10 is 32x32
-
 import torch.nn as nn
 import torch.nn.functional as F
+import time
+import copy
+
+def get_transforms_and_classes():
+    '''
+    cifar10 is normalized this way
+    :return: transforms, and classes
+    '''
+    return (transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
+    ('plane', 'car', 'bird', 'cat','deer', 'dog', 'frog', 'horse', 'ship', 'truck'))
+
+def load_data():
+    '''
+    lets get all the data we need
+    :return:
+    '''
+    transform,_ = get_transforms_and_classes()
+    trainset    = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                            download=True, transform=transform)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=4,
+                                              shuffle=True, num_workers=2)
+    testset     = torchvision.datasets.CIFAR10(root='./data', train=False,
+                                           download=True, transform=transform)
+    testloader  = torch.utils.data.DataLoader(testset, batch_size=4,
+                                             shuffle=False, num_workers=2)
+    return trainset, trainloader,testset,testloader
+
 class Net(nn.Module):
     '''
     only takes 32x32 images (fully connected layers dictate this)
@@ -73,7 +73,6 @@ class Net(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
-
 
 class Net_adaptive_pool(nn.Module):
     '''
@@ -123,7 +122,6 @@ class Net_adaptive_pool_Small(nn.Module):
         x = self.fc2(x)
         return x
 
-
 def forward(net, criterion, optimizer, dataloader,device, writer = None, train=True):
     '''
     forward pass, both train and eval
@@ -169,21 +167,20 @@ def forward(net, criterion, optimizer, dataloader,device, writer = None, train=T
         running_corrects += torch.sum(preds == labels.data)
 
         # if i % 100 == 99:  # print every 100 mini-batches
-        #     writer('loss_L', loss_l.item(), all_batch_cntr)
-        #     writer('loss_C', loss_c.item(), all_batch_cntr)
+        #     write/print out additional info if needed here
 
     len_dataset = float(len(dataloader.dataset))
     return  (running_loss/len_dataset , running_corrects.double()/len_dataset)
 
-import time
-import copy
-def main(net, criterion, optimizer, device):
-
+def train_test(net, criterion, optimizer, device):
     # tensorboard tracker
     writer = SummaryWriter()
-    NUMB_EPOCHS = 30
+    NUMB_EPOCHS = 35
     PATH = "./model_weights.pth"
     best_acc = 0.0
+
+    #lets get our data
+    trainset, trainloader, testset, testloader = load_data()
 
     for epoch in range(NUMB_EPOCHS):  # loop over the dataset multiple times
         trn_lss, trn_acc = forward(net, criterion, optimizer, trainloader,device,writer=writer)
@@ -199,19 +196,23 @@ def main(net, criterion, optimizer, device):
         print('Training loss: %.3f  accuracy: %.3f' % (trn_lss, trn_acc) +
               ' Testing loss: %.3f  accuracy: %.3f' % (tst_lss, tst_acc))
 
-        if (trn_acc > best_acc):
-            best_acc = trn_acc
+        if (tst_acc > best_acc):
+            best_acc = tst_acc
             best_model_wts = copy.deepcopy(net.state_dict())
             torch.save(net.state_dict(), PATH)
 
     print('Finished Training')
     writer.close()
 
-def check_each_class_accuracy(net, testloader, device):
+def check_each_class_accuracy(net, device):
     '''
     check the accuracy of each class, should be way above 10%
     :return:
     '''
+    # lets get our data
+    _,_,_, testloader = load_data()
+
+    _,classes = get_transforms_and_classes()
     class_correct = list(0. for i in range(10))
     class_total = list(0. for i in range(10))
     with torch.no_grad():
@@ -231,13 +232,12 @@ def check_each_class_accuracy(net, testloader, device):
             classes[i], 100 * class_correct[i] / class_total[i]))
 
 if __name__ == "__main__":
-
     PATH = "./model_weights.pth"
 
     # choose which network to use
     # net = Net()
-    net = Net_adaptive_pool()
     # net = Net_adaptive_pool_Small()
+    net = Net_adaptive_pool()
 
     # load trained weights if there
     try:
@@ -256,5 +256,5 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 
-    main(net, criterion, optimizer,device)
-    check_each_class_accuracy(net, testloader, device)
+    train_test(net, criterion, optimizer,device)
+    check_each_class_accuracy(net, device)
