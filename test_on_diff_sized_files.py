@@ -6,17 +6,16 @@ import torchvision
 import torchvision.transforms as transforms
 import utils
 from tensorboardX import SummaryWriter
-from train import Net_adaptive_pool,get_transforms_and_classes
+from train import Net_adaptive_pool,get_transforms
 from glob import glob
 import time
+import settings as s
 
 ########################################################################
 # The output of torchvision datasets are PILImage images of range [0, 1].
 # We transform them to Tensors of normalized range [-1, 1].
-transform, classes =  get_transforms_and_classes()
-
-# get a list of all the files of iterest
-where_diff_sized_images_are = "./diff_sized/"
+transform = get_transforms()
+classes = s.classes
 
 from PIL import Image
 def image_loader(image_name, size = None):
@@ -87,7 +86,7 @@ if __name__ == "__main__":
     net.to(device)
     net.eval()  # going to eval
 
-    filelist = glob(where_diff_sized_images_are + "*.jpg")
+    filelist = glob(s.where_diff_sized_images_are + "*.jpg")
 
     print("Evaluate original size")
     evaluate_dir(filelist,net)

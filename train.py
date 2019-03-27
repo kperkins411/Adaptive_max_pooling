@@ -25,21 +25,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 import time
 import copy
+import settings as s
 
-def get_transforms_and_classes():
+def get_transforms():
     '''
     cifar10 is normalized this way
     :return: transforms, and classes
     '''
-    return (transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
-    ('plane', 'car', 'bird', 'cat','deer', 'dog', 'frog', 'horse', 'ship', 'truck'))
+    return transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 def load_data():
     '''
     lets get all the data we need
     :return:
     '''
-    transform,_ = get_transforms_and_classes()
+    transform = get_transforms()
     trainset    = torchvision.datasets.CIFAR10(root='./data', train=True,
                                             download=True, transform=transform)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=4,
@@ -77,49 +77,46 @@ class Net(nn.Module):
 class Net_adaptive_pool(nn.Module):
     '''
     takes any sized images because of the adaptive max_pool layer
+    wnt 2 fully connected conv layers and then start to pool
     '''
     def __init__(self):
         super(Net_adaptive_pool, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=10, kernel_size=5, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True)
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=10, kernel_size=3, stride=1,
+                 padding=1, dilation=1, groups=1, bias=True)
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(10, 10, 3)
         self.adaptive_mp2d=nn.AdaptiveMaxPool2d((5,5))
         self.fc1 = nn.Linear(10 * 5 * 5, 50)
-        self.fc2 = nn.Linear(50, 30)
-        self.fc3 = nn.Linear(30, 10)
+        self.fc2 = nn.Linear(50, 10)
+
+    def forward1(self,x):
+        x = F.relu(self.conv1(x))  # output = 10*32*32
+        x = F.relu(self.conv2(x))  # output = 10*30*30
+        x = self.pool(F.relu(self.conv2(x)))  # output = 10*14,14
+        return x
 
     def forward(self, x):       #x.shape = 3*32*32
-        x = self.pool(F.relu(self.conv1(x)))    # output = 10*14*14
-        x = self.pool(F.relu(self.conv2(x)))  # output = 6*5*5
-        x = self.adaptive_mp2d(F.relu(self.conv2(x)))    # output = 10*5*5
+        x=self.forward1(x)
+        x = self.adaptive_mp2d(F.relu(self.conv2(x)))    # output = 10*12*12
         x = x.view(-1, 10 * 5 * 5)      #the second 5x5 is the size of the output of the above
                                         # this is what determines input size
         x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
+        x = self.fc2(x)
         return x
 
-class Net_adaptive_pool_Small(nn.Module):
+class Net_adaptive_pool_Small(Net_adaptive_pool):
     def __init__(self):
         super(Net_adaptive_pool_Small, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=5, stride=1,
-                               padding=0, dilation=1, groups=1, bias=True)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 10, 5)
-        self.adaptive_mp2d = nn.AdaptiveMaxPool2d((1,1))
+        self.adaptive_mp2d = nn.AdaptiveMaxPool2d((1, 1))
         self.fc1 = nn.Linear(10 , 10)
-        self.fc2 = nn.Linear(10, 10)
-
 
     def forward(self, x):  # x.shape = 3*32*32
-        x = self.pool(F.relu(self.conv1(x)))  # output = 6*14*14
-        # x = self.pool(F.relu(self.conv2(x)))  # output = 10*5*5
-        x = self.adaptive_mp2d(F.relu(self.conv2(x)))  # output = 10*5*5
-        x = x.view(-1, 10 )  # the second 5x5 is the size of the output of the above
-        # this is what determines input size
+        x = self.forward1(x)
+
+        x = self.adaptive_mp2d(F.relu(self.conv2(x)))  # output = 10*1*1
+        x = x.view(-1, 10 )  # the second is the size of the output of the above
         x = F.relu(self.fc1(x))
-        x = self.fc2(x)
+        x = self.fc1(x)
         return x
 
 def forward(net, criterion, optimizer, dataloader,device, writer = None, train=True):
@@ -166,23 +163,23 @@ def forward(net, criterion, optimizer, dataloader,device, writer = None, train=T
         running_loss += loss.item()
         running_corrects += torch.sum(preds == labels.data)
 
-        # if i % 100 == 99:  # print every 100 mini-batches
+        # if iS % 100 == 99:  # print every 100 mini-batches
         #     write/print out additional info if needed here
 
     len_dataset = float(len(dataloader.dataset))
     return  (running_loss/len_dataset , running_corrects.double()/len_dataset)
 
-def train_test(net, criterion, optimizer, device):
+def train_test(net, criterion, optimizer, device, numEpochs = s.NUMB_EPOCHS, path =s.PATH ):
     # tensorboard tracker
     writer = SummaryWriter()
-    NUMB_EPOCHS = 35
-    PATH = "./model_weights.pth"
+
+    #assumme the worst
     best_acc = 0.0
 
     #lets get our data
     trainset, trainloader, testset, testloader = load_data()
 
-    for epoch in range(NUMB_EPOCHS):  # loop over the dataset multiple times
+    for epoch in range(numEpochs):  # loop over the dataset multiple times
         trn_lss, trn_acc = forward(net, criterion, optimizer, trainloader,device,writer=writer)
 
         tst_lss, tst_acc = forward(net, criterion, optimizer, testloader,device, writer = writer, train=False)
@@ -199,7 +196,7 @@ def train_test(net, criterion, optimizer, device):
         if (tst_acc > best_acc):
             best_acc = tst_acc
             best_model_wts = copy.deepcopy(net.state_dict())
-            torch.save(net.state_dict(), PATH)
+            torch.save(net.state_dict(), s.PATH)
 
     print('Finished Training')
     writer.close()
@@ -212,7 +209,7 @@ def check_each_class_accuracy(net, device):
     # lets get our data
     _,_,_, testloader = load_data()
 
-    _,classes = get_transforms_and_classes()
+    classes = s.classes
     class_correct = list(0. for i in range(10))
     class_total = list(0. for i in range(10))
     with torch.no_grad():
@@ -231,8 +228,8 @@ def check_each_class_accuracy(net, device):
         print('Accuracy of %5s : %2d %%' % (
             classes[i], 100 * class_correct[i] / class_total[i]))
 
+
 if __name__ == "__main__":
-    PATH = "./model_weights.pth"
 
     # choose which network to use
     # net = Net()
@@ -241,9 +238,9 @@ if __name__ == "__main__":
 
     # load trained weights if there
     try:
-        net.load_state_dict(torch.load(PATH))
+        net.load_state_dict(torch.load(s.PATH))
     except FileNotFoundError:
-        print("File " + PATH + " not present")
+        print("File " + s.PATH + " not present")
 
     # using GPU?
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
