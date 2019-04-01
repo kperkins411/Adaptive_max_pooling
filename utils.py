@@ -1,6 +1,7 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
+from .. import hyperparam_helper
 
 # functions to show an image
 

@@ -4,9 +4,9 @@ testing a fully trained network on different sized images
 import torch
 import torchvision
 import torchvision.transforms as transforms
-import utils
 from tensorboardX import SummaryWriter
-from train import Net_adaptive_pool,get_transforms
+from train import get_transforms
+from models import Net_adaptive_pool
 from glob import glob
 import time
 import settings as s
